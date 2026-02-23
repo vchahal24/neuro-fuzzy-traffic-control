@@ -476,5 +476,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # only run main() when the file is executed directly
     main()
