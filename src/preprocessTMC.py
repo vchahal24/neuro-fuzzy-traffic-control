@@ -1,3 +1,12 @@
+# PREPROCESSING PIPELINE FOR TORONTO TMC DATASET
+# raw -> interval/daily/metadata
+# 1. Parses CLI arguments for input paths and output direcctory
+# 2. Creates the output directory
+# 3. Runs:
+#    a. preprocessRawData to read the raw CSV and write out the cleaned interval features and daily rollups
+#    b. generateMetadata to merge together the daily rollups with the provided summary files for a metadata table
+# 4. Prints out the paths of the generated files for user confirmation
+
 #!/usr/bin/env python3
 # allows you to run the file as "./preprocessTMC.py"
 
@@ -15,6 +24,8 @@ Outputs (under outputs/preprocessed):
 - tmc_daily_features_all.csv
 - tmc_intersection_metadata_all.csv
 """
+
+#------------------------------------------------------------- START OF PROGRAM -------------------------------------------------------------------------------#
 
 # enables forward refs in type hints
 from __future__ import annotations;

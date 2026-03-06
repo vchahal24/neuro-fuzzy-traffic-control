@@ -5,7 +5,7 @@
 
 # simConfigModels
 
-from .SimConfigModels import ControllerConfig, DataSelectionConfig, SimulationConfig
+from .simConfigModels import ControllerConfig, DataSelectionConfig, SimulationConfig
 
 # controllerModels
 from .controllerModels import returnController

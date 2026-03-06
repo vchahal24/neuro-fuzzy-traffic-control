@@ -1,6 +1,8 @@
 # DATA LOADER FOR SIMULATION STAGE
 # Purpose: Read the three preprocessed CSVs, apply the selection filters from the user, return a clean Python object for each intersection for the simulator
 
+#------------------------------------------------------------- START OF PROGRAM -------------------------------------------------------------------------------#
+
 from __future__ import annotations
 
 # dataclass for holding all per-intersection tables needed for simulation
@@ -16,7 +18,7 @@ from typing import Iterable
 import pandas as pd
 
 # config for selecting subsets of intersections
-from .SimConfigModels import DataSelectionConfig
+from .simConfigModels import DataSelectionConfig
 
 # one intersection worth of metadata, daily row, all interval rows
 @dataclass(frozen=True)

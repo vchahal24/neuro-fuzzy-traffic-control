@@ -44,8 +44,8 @@ from pathlib import Path
 # importing protocol, for defining types
 from typing import Protocol
 
-# imports dataclasses from SimConfigModels
-from .SimConfigModels import ControllerConfig, SimulationConfig
+# imports dataclasses from simConfigModels
+from .simConfigModels import ControllerConfig, SimulationConfig
 
 # tries to import MATLAB
 # if it doesnt import MATLAB engine, then project still runs baseline_fixed, baseline_proportional, anfis (in stub mode)
