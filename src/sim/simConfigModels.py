@@ -19,6 +19,7 @@ from dataclasses import dataclass
 # frozen = True makes this FIXED
 @dataclass(frozen=True)
 
+
 # essentially these are read only structs
 # they cannot change values mid run
 
