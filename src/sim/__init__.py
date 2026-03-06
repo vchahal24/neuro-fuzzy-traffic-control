@@ -1,12 +1,14 @@
 # SIMULATION PACKAGE
 # Purpose: This re exports the pieces so they can be imported cleanly
 
+#------------------------------------------------------------- START OF PROGRAM -------------------------------------------------------------------------------#
+
 # simConfigModels
 
 from .SimConfigModels import ControllerConfig, DataSelectionConfig, SimulationConfig
 
-# trafficSignalControllerModels
-from .trafficSignalControllerModels import build_controller
+# controllerModels
+from .controllerModels import returnController
 
 # Loads your three preprocessed CSV tables into one per intersection object used by simulation:
 from .intersectionDataLoader import loadIntersectionCall
@@ -19,7 +21,7 @@ __all__ = [
     "ControllerConfig",
     "DataSelectionConfig",
     "SimulationConfig",
-    "build_controller",
+    "returnController",
     "loadIntersectionCall",
     "run_experiments",
 ]

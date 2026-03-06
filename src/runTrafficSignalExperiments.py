@@ -1,17 +1,19 @@
 # SIMULATION + EXPERIMENTS (CSVs -> results)
 # Purpose: This serves as the main CLI entry for running traffic signal experiments
 # 1. Parses command line arguments for:
-#    a. Selection filters (most recent, leg type, top N by volume)
-#    b. Simulation settings (mode, step seconds, cycle length, yellow/all-red times
+#    i. Selection filters (most recent, leg type, top N by volume)
+#    ii. Simulation settings (mode, step seconds, cycle length, yellow/all-red times
 #       saturation flow, min/max green, fixed NS ratio)
-#    c. Controller settings (which controllers to run, ANFIS mode, MATLAB entry point)
-#    d. Input CSV paths and output directory
+#    iii. Controller settings (which controllers to run, ANFIS mode, MATLAB entry point)
+#    iv. Input CSV paths and output directory
 # 2. Builds typed config objects from the parsed arguments
-#    a. DataSelectionConfig for filtering which intersections to run
-#    b. SimulationConfig for how to run the simulations
-#    c. List of ControllerConfig for which controllers to run and their settings
+#    i. DataSelectionConfig for filtering which intersections to run
+#    ii. SimulationConfig for how to run the simulations
+#    iii. List of ControllerConfig for which controllers to run and their settings
 # 3. Calls the main experiment runner function with the configs and CSV paths
 # 4. Prints out the paths of the saved results and number of rows for confirmation
+
+#------------------------------------------------------------- START OF PROGRAM -------------------------------------------------------------------------------#
 
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ import argparse
 from pathlib import Path
 
 # config models for selection, simulation settings and controller settings
+
 # ControllerConfig: Which controller to run and special settings (ANFIS mode, MATLAB entry point)
 # DataSelectionConfig: How to filter/select which intersections to run experiments on
 # SimulationConfig: How to run the simulations (mode, step seconds, cycle length, yellow/all-red times, saturation flow, min/max green, fixed NS ratio)
@@ -125,9 +128,9 @@ def convertToConfig(args: argparse.Namespace) -> tuple[DataSelectionConfig, Simu
         yellow_seconds=args.yellow,
         all_red_seconds=args.all_red,
         saturation_flow_veh_per_sec_per_approach=args.sat_flow,
-        min_green_seconds=args.min_green,
-        max_green_seconds=args.max_green,
-        fixed_ns_ratio=args.fixed_ns_ratio,
+        minGreenSecs=args.min_green,
+        maxGreenSecs=args.max_green,
+        fixedNSRatio=args.fixed_ns_ratio,
     )
 
     # list of controllers

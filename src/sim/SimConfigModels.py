@@ -5,6 +5,8 @@
 # 2. SimulationConfig: simulation + limits (mode, step seconds, cycle length seconds, min max green, etc.)
 # 3. ControllerConfig: which controller, and if ANFIS, whether its stub vs MATLAB, and entry point
 
+#------------------------------------------------------------- START OF PROGRAM -------------------------------------------------------------------------------#
+
 from __future__ import annotations
 
 # dataclass is used for simple typed config dataclasses
@@ -48,9 +50,9 @@ class SimulationConfig:
     yellow_seconds: int = 5
     all_red_seconds: int = 2
     saturation_flow_veh_per_sec_per_approach: float = 0.5
-    min_green_seconds: int = 10
-    max_green_seconds: int = 60
-    fixed_ns_ratio: float = 0.5
+    minGreenSecs: int = 10
+    maxGreenSecs: int = 60
+    fixedNSRatio: float = 0.5
 # passed into simulate intersection for timing + queue update rules
 # passed into build controller so controllers can respect min/max and effective green
 # used when computing green split and discharge very often
