@@ -32,6 +32,23 @@ class intersectionDataClass:
     # this is the time series data the simulator will use cycle by cycle
     intervalAllRows: pd.DataFrame
 
+    # compatibility aliases used by simulator/runner modules
+    @property
+    def count_id(self) -> str:
+        return self.countID
+
+    @property
+    def meta_row(self) -> pd.Series:
+        return self.metadataOneRow
+
+    @property
+    def daily_row(self) -> pd.Series:
+        return self.dailyOneRow
+
+    @property
+    def interval_rows(self) -> pd.DataFrame:
+        return self.intervalAllRows
+
 # we need to convert the count id values to string
 # one file might load count ID as float or integer, so for consistency
 # make them all strings
@@ -162,3 +179,21 @@ def loadIntersectionCall(
         )
     return outputObjects
 
+
+# compatibility alias expected by other modules
+IntersectionData = intersectionDataClass
+
+
+# compatibility wrapper expected by other modules
+def load_selected_intersections(
+    interval_csv: Path,
+    daily_csv: Path,
+    metadata_csv: Path,
+    selection: DataSelectionConfig,
+) -> list[intersectionDataClass]:
+    return loadIntersectionCall(
+        intervalCSV=interval_csv,
+        dailyCSV=daily_csv,
+        metadataCSV=metadata_csv,
+        selection=selection,
+    )

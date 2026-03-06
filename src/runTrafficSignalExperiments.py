@@ -25,7 +25,7 @@ from pathlib import Path
 # ControllerConfig: Which controller to run and special settings (ANFIS mode, MATLAB entry point)
 # DataSelectionConfig: How to filter/select which intersections to run experiments on
 # SimulationConfig: How to run the simulations (mode, step seconds, cycle length, yellow/all-red times, saturation flow, min/max green, fixed NS ratio)
-from sim.simulationConfigurationModels import ControllerConfig, DataSelectionConfig, SimulationConfig
+from sim.SimConfigModels import ControllerConfig, DataSelectionConfig, SimulationConfig
 
 # main experiment pipeline entry
 # loads CSV, filter selections, runs simulations, saves results
@@ -45,25 +45,21 @@ def parseCLIArgs() -> argparse.Namespace:
     parser.add_argument(
         "--interval-csv",
         default="outputs/preprocessed/tmc_interval_features_all.csv",
-        help="Path to the preprocessed interval features CSV file."
     )
     parser.add_argument(
         "--daily-csv",
         default="outputs/preprocessed/tmc_daily_features_all.csv",
-        help="Path to the preprocessed daily features CSV file."
     )
     parser.add_argument(
         "--metadata-csv",
         default="outputs/preprocessed/tmc_intersection_metadata_all.csv",
-        help="Path to the preprocessed metadata CSV file."
     )
-    parser.add_argument("--out-dir", default="outputs/experiments/latest", help="Path to the output directory for saving experiment results.")
+    parser.add_argument("--out-dir", default="outputs/experiments/latest")
 
     # --controllers option to specify which controllers to run, as a comma-separated list
     parser.add_argument(
         "--controllers",
         default="baseline_fixed,baseline_proportional,anfis",
-        help="Comma-separated list from: baseline_fixed, baseline_proportional, anfis",
     )
     
     # --anfis-mode option to specify how to run the ANFIS controller
@@ -74,35 +70,33 @@ def parseCLIArgs() -> argparse.Namespace:
     parser.add_argument(
         "--matlab-entrypoint",
         default="",
-        help="Path to wrapper script/function entry for MATLAB integration mode.",
     )
 
     # --most-recent-only flag to only run experiments on the most recent data for each intersection
-    parser.add_argument("--most-recent-only", action="store_true", help="Only run experiments on the most recent data for each intersection.")
+    parser.add_argument("--most-recent-only", action="store_true")
     
     # --leg-type-filter option to specify which leg types to include in the experiments, with choices for all, 4_leg, 3_leg, 2_leg_NS, 2_leg_EW, 2_leg_other, other
     parser.add_argument(
         "--leg-type-filter",
         default="all",
-        help="all | 4_leg | 3_leg | 2_leg_NS | 2_leg_EW | 2_leg_other | other",
     )
     
     # --top-n-by-volume option to specify to only run experiments on the top N intersections by volume, with default of 0 for no limit
-    parser.add_argument("--top-n-by-volume", type=int, default=0, help="Only run experiments on the top N intersections by volume.")
+    parser.add_argument("--top-n-by-volume", type=int, default=0)
 
     # Simulation settings
     # With defaults and choices where applicable
     # Help strings to explain each option
-    parser.add_argument("--sim-mode", default="full_day", choices=["full_day", "single_interval"], help="Simulation mode.")
-    parser.add_argument("--interval-index", type=int, default=0, help="Index of the interval to simulate.")
-    parser.add_argument("--step-seconds", type=float, default=1.0, help="Simulation step size in seconds.")
-    parser.add_argument("--cycle-length", type=int, default=90, help="Length of the signal cycle in seconds.")
-    parser.add_argument("--yellow", type=int, default=5, help="Yellow light duration in seconds.")
-    parser.add_argument("--all-red", type=int, default=2, help="All-red light duration in seconds.")
-    parser.add_argument("--sat-flow", type=float, default=0.5, help="Saturation flow rate in vehicles per second per approach.")
-    parser.add_argument("--min-green", type=int, default=10, help="Minimum green light duration in seconds.")
-    parser.add_argument("--max-green", type=int, default=60, help="Maximum green light duration in seconds.")
-    parser.add_argument("--fixed-ns-ratio", type=float, default=0.5, help="Fixed north-south split ratio.")
+    parser.add_argument("--sim-mode", default="full_day", choices=["full_day", "single_interval"])
+    parser.add_argument("--interval-index", type=int, default=0)
+    parser.add_argument("--step-seconds", type=float, default=1.0)
+    parser.add_argument("--cycle-length", type=int, default=90)
+    parser.add_argument("--yellow", type=int, default=5)
+    parser.add_argument("--all-red", type=int, default=2)
+    parser.add_argument("--sat-flow", type=float, default=0.5)
+    parser.add_argument("--min-green", type=int, default=10)
+    parser.add_argument("--max-green", type=int, default=60)
+    parser.add_argument("--fixed-ns-ratio", type=float, default=0.5)
 
     # parse the arguments and return
     return parser.parse_args()
