@@ -19,7 +19,6 @@ from dataclasses import dataclass
 # frozen = True makes this FIXED
 @dataclass(frozen=True)
 
-
 # essentially these are read only structs
 # they cannot change values mid run
 
@@ -45,7 +44,7 @@ class DataSelectionConfig:
 @dataclass(frozen=True)
 class SimulationConfig:
     mode: str = "full_day"  # full_day or single_interval
-    interval_index: int = 0  # only used when mode == single_interval
+    intervalIndex: int = 0  # only used when mode == single_interval
     step_seconds: float = 1.0
     cycle_length_seconds: int = 90
     yellow_seconds: int = 5

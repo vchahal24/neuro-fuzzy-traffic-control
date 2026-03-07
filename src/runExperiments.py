@@ -122,7 +122,7 @@ def convertToConfig(args: argparse.Namespace) -> tuple[DataSelectionConfig, Simu
     # Uses max(0,...) to prevent negative indexes
     simConfig = SimulationConfig(
         mode=args.sim_mode,
-        interval_index=max(0, args.interval_index),
+        intervalIndex=max(0, args.interval_index),
         step_seconds=args.step_seconds,
         cycle_length_seconds=args.cycle_length,
         yellow_seconds=args.yellow,
