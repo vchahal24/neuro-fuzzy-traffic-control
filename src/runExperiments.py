@@ -32,7 +32,7 @@ from sim.simConfigModels import ControllerConfig, DataSelectionConfig, Simulatio
 
 # main experiment pipeline entry
 # loads CSV, filter selections, runs simulations, saves results
-from sim.trafficExperimentRunner import run_experiments
+from sim.experimentManager import run_experiments
 
 # parses all command line options for experiment runs
 def parseCLIArgs() -> argparse.Namespace:

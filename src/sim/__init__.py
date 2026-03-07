@@ -14,7 +14,7 @@ from .controllerModels import returnController
 from .intersectionDataLoader import loadIntersectionCall
 
 # Runs the traffic experiments:
-from .trafficExperimentRunner import run_experiments
+from .experimentManager import run_experiments
 
 # the main simulation logic and metrics calculations:
 __all__ = [
