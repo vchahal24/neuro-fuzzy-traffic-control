@@ -32,7 +32,7 @@ from sim.simConfigModels import ControllerConfig, DataSelectionConfig, Simulatio
 
 # main experiment pipeline entry
 # loads CSV, filter selections, runs simulations, saves results
-from sim.experimentManager import run_experiments
+from sim.experimentManager import experimentManager
 
 # parses all command line options for experiment runs
 def parseCLIArgs() -> argparse.Namespace:
@@ -168,13 +168,13 @@ def main() -> None:
     # expects the runner to return two dataframes:
     # 1. resultsDataFrame with per-intersection results for each controller and interval
     # 2. aggrDataFrame with aggregated results across intersections for each controller and interval
-    resultsDataFrame, aggrDataFrame = run_experiments(
+    resultsDataFrame, aggrDataFrame = experimentManager(
         intervalCSV=Path(args.interval_csv),
         dailyCSV=Path(args.daily_csv),
         metadataCSV=Path(args.metadata_csv),
-        selectionCFG=selectConfig,
-        simCFG=simConfig,
-        controllersCFG=controllerConfig,
+        selectionConfig=selectConfig,
+        simConfig=simConfig,
+        controllerConfig=controllerConfig,
         outDir=Path(args.out_dir),
     )
 
