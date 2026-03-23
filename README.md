@@ -1,49 +1,5 @@
 ﻿# Neuro-Fuzzy Traffic Signal Control for Urban Intersections
 
-## Project Overview
-
-In general cases, the control of traffic signals in urban areas follows a fixed time control pattern based on historical traffic information. Though the system is simple and effective, the traffic signals do not adapt to the changes occurring in the traffic pattern in real time.
-
-This results in:
-
-- unnecessary vehicle delays
-- long queues due to uneven traffic demands
-- inefficient utilization of green time for the traffic signals.
-
-Adaptive Signal Control attempts to solve the above-occurring issues by adapting to the changes occurring due to traffic demands.
-
-This project aims to find whether the performance of a traffic intersection can be improved by implementing a Neuro-Fuzzy traffic controller.
-
-In this project, we will implement the following traffic controllers by simulating the traffic flow with actual Toronto Traffic Monitoring Count (TMC) data for various intersections:
-
-- Baseline traffic controllers
-- A Neuro-Fuzzy Adaptive Controller (ANFIS) traffic controller
-
----
-
-## Problem Statement
-
-Most traffic signal systems are pre-timed signal plans, where a set of green time is provided per phase in a signal cycle.
-
-However, in a real-world scenario, traffic demands are highly variable because of factors such as:
-
-- time-of-day variations
-- directional demands
-- daily demands
-- unpredictable congestion
-
-Pre-timing is not suitable to address these demands.
-
-For example, in a situation where north-south traffic is high and east-west traffic is low, a pre-timed controller will still provide equal green time to both directions, thus wasting capacity.
-
-Queues are formed even when green time is available in another direction.
-
-Therefore, the research question is:
-
-**Can a neuro-fuzzy controller be employed to dynamically allocate green time in response to traffic demands in order to reduce congestion and delay?**
-
----
-
 ## Our Approach
 
 The project follows a three-stage approach.
