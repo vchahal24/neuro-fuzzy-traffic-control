@@ -1,0 +1,49 @@
+[System]
+Name='traffic_ns_split'
+Type='sugeno'
+Version=2.0
+NumInputs=2
+NumOutputs=1
+NumRules=9
+AndMethod='min'
+OrMethod='max'
+ImpMethod='min'
+AggMethod='max'
+DefuzzMethod='wtaver'
+
+[Input1]
+Name='queue_total_norm'
+Range=[0 1]
+NumMFs=3
+MF1='Low':'trapmf',[-0.1 0 0.2 0.45]
+MF2='Medium':'trimf',[0.25 0.45 0.65]
+MF3='High':'trapmf',[0.55 0.8 1 1.1]
+
+[Input2]
+Name='imbalance'
+Range=[-1 1]
+NumMFs=3
+MF1='EW_Heavy':'trapmf',[-1.1 -1 -0.35 -0.05]
+MF2='Balanced':'trimf',[-0.25 0 0.25]
+MF3='NS_Heavy':'trapmf',[0.05 0.35 1 1.1]
+
+[Output1]
+Name='ns_ratio'
+Range=[0 1]
+NumMFs=5
+MF1='VeryShort':'constant',[0.18]
+MF2='Short':'constant',[0.33]
+MF3='Medium':'constant',[0.48]
+MF4='Long':'constant',[0.65]
+MF5='VeryLong':'constant',[0.8]
+
+[Rules]
+1 1, 2 (1) : 1
+1 2, 3 (1) : 1
+1 3, 4 (1) : 1
+2 1, 2 (1) : 1
+2 2, 3 (1) : 1
+2 3, 4 (1) : 1
+3 1, 1 (1) : 1
+3 2, 3 (1) : 1
+3 3, 5 (1) : 1
