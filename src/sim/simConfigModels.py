@@ -53,6 +53,11 @@ class SimulationConfig:
     minGreenSecs: int = 10
     maxGreenSecs: int = 60
     fixedNSRatio: float = 0.5
+    enableInvariantChecks: bool = False
+    invariantTolerance: float = 1e-6
+    exportTrainingData: bool = False
+    trainingQueueScale: float = 40.0
+    trainingCsvName: str = "cycle_training_data.csv"
 # passed into simulate intersection for timing + queue update rules
 # passed into build controller so controllers can respect min/max and effective green
 # used when computing green split and discharge very often
@@ -62,7 +67,9 @@ class SimulationConfig:
 # for ANFIS, it also controls whether we are using a python stub or calling from MATLAB
 @dataclass(frozen=True)
 class ControllerConfig:
-    controller_name: str  # baseline_fixed | baseline_proportional | anfis
-    anfisMode: str = "stub"  # stub | matlab
+    controller_name: str  # baseline_fixed | baseline_proportional | anfis | neuro_fuzzy_octave
+    anfisMode: str = "stub"  # stub | matlab | octave
     matlabEntry: str = ""  # MATLAB function (currently undefined)
+    octaveEntry: str = ""  # planned GNU Octave entrypoint (not wired yet)
+    octaveCliPath: str = r"C:\Program Files\GNU Octave\Octave-11.1.0\mingw64\bin\octave-cli.exe"
     matlab_timeout_seconds: int = 30

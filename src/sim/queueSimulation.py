@@ -41,6 +41,8 @@ from .controllerModels import controlInp, Controller
 # has intersection ID, metadata row, daily row, all interval rows
 from .intersectionDataLoader import IntersectionData
 
+EPSILON = 1e-6
+
 # this class stores all the cumulative metrics while the simulation is running
 @dataclass
 class storeMetrics:
@@ -146,6 +148,62 @@ def arrRateFromIntRow(row: pd.Series) -> dict[str, float]:
         "w": float(row["west_vehicle_15min"]) / 900.0,
     }
 
+
+def clamp(value: float, minValue: float, maxValue: float) -> float:
+    # keeps a number inside [minValue, maxValue]
+    # used to avoid target ratios or green values going outside safe bounds
+    return max(minValue, min(value, maxValue))
+
+
+def checkInvariant(enabled: bool, condition: bool, message: str) -> None:
+    # invariant checks are optional guardrails for debug/validation runs
+    # when enabled, fail immediately if a required condition does not hold
+    if enabled and not condition:
+        raise AssertionError(f"Simulation invariant failed: {message}")
+
+
+def buildTrainingRow(
+    *,
+    controllerName: str,
+    countId: str,
+    cycleIndex: int,
+    qNS: float,
+    qEW: float,
+    arrivalNS: float,
+    arrivalEW: float,
+    prevGreenNS: float,
+    effectiveGreenSeconds: float,
+    queueScale: float,
+) -> dict[str, float | int | str]:
+    # builds one supervised-training row from the current cycle state
+    # this is used when exporting training data for the neuro-fuzzy/octave controller
+    queueTotal = qNS + qEW
+    # normalize total queue into [0, 1] using the configured scaling constant
+    queueTotalNorm = min(queueTotal / max(queueScale, EPSILON), 1.0)
+    # phase imbalance: -1 means all EW, +1 means all NS
+    imbalance = (qNS - qEW) / max(queueTotal, EPSILON)
+
+    # baseline target starts from demand split and applies queue imbalance correction
+    totalArrival = arrivalNS + arrivalEW
+    baseRatio = 0.5 if totalArrival <= EPSILON else arrivalNS / totalArrival
+    queueCorrection = 0.35 * imbalance
+    # cap target ratio to keep supervision stable and realistic
+    targetNsRatio = clamp(baseRatio + queueCorrection, 0.20, 0.80)
+
+    return {
+        "controller": controllerName,
+        "count_id": countId,
+        "cycle_index": cycleIndex,
+        "queue_total": queueTotal,
+        "queue_total_norm": queueTotalNorm,
+        "imbalance": imbalance,
+        "arrival_ns": arrivalNS,
+        "arrival_ew": arrivalEW,
+        "prev_green_ns": prevGreenNS,
+        "effective_green": effectiveGreenSeconds,
+        "target_ns_ratio": targetNsRatio,
+    }
+
 # chooses whether to simulate the full day or a specific 15-minute interval
 def fullDayOr15Min(intervalRows: pd.DataFrame, simConfig: SimulationConfig) -> pd.DataFrame:
     # sorts the interval rows by time and resets the index
@@ -171,7 +229,7 @@ def simIntersection(
     data: IntersectionData,
     controller: Controller,
     config: SimulationConfig,
-) -> dict[str, float | str]:
+) -> tuple[dict[str, float | str], list[dict[str, float | int | str]]]:
     # gets either all interval rows or one interval row depending on full day or 15 min
     intervalRows = fullDayOr15Min(data.interval_rows, config)
     
@@ -183,6 +241,8 @@ def simIntersection(
     # error check because zero or negative timestep breaks logic
     if stepSeconds <= 0:
         raise ValueError("ERROR. step_seconds must be > 0.")
+    checkInvariants = bool(config.enableInvariantChecks)
+    invariantTolerance = float(config.invariantTolerance)
 
     # computes the usable green time per cycle
     effectiveGreenSeconds = effectiveGreen(config)
@@ -197,13 +257,15 @@ def simIntersection(
     # this means that when the simulation begins, there should be no preloaded congestion
     # ASSUMPTION
     qByApproach = {"n": 0.0, "e": 0.0, "s": 0.0, "w": 0.0}
+    initialQueueVehicles = sum(qByApproach.values())
     
     # initializes the previous NS green to half the usable green
     # since we dont have data before the very start, we use a neutral 50/50 split as the controller input
     previousGreenNs = effectiveGreenSeconds * 0.5
     
     # creates a blank metrics accumulator
-    storeMetrics = storeMetrics()
+    metricsStore = storeMetrics()
+    cycleTrainingRows: list[dict[str, float | int | str]] = []
 
     # counters for how many intervals and cycles were simulated
     intervalCounter = 0
@@ -238,7 +300,7 @@ def simIntersection(
             #  builds the input object that is sent to the controller
             # this package sends:
             # current NS queue, current EQ queue, current NS demand, current EW demand, previous NS green, total usable green
-            controller = controlInp(
+            controlInput = controlInp(
                 qNS=queueNs,
                 qEW=queueEw,
                 arrivalNS=arrivalNs,
@@ -249,7 +311,7 @@ def simIntersection(
             
             # asks the controller to decide how much north-south should get of the effective green
             # ------- KEY DECISION ----------
-            greenNs = controller.decideGreenNS(controller)
+            greenNs = controller.decideGreenNS(controlInput)
             
             # set caps for the NS phase so that its not unreasonable short or long
             greenNs = max(config.minGreenSecs, min(config.maxGreenSecs, greenNs))
@@ -258,9 +320,32 @@ def simIntersection(
             
             # whatever is leftover goes to east-west phase
             greenEw = effectiveGreenSeconds - greenNs
+            checkInvariant(
+                checkInvariants,
+                abs((greenNs + greenEw) - effectiveGreenSeconds) <= invariantTolerance,
+                f"green split mismatch (ns={greenNs}, ew={greenEw}, effective={effectiveGreenSeconds})",
+            )
             
             # store the current greenNs in previousGreenNS for next iteration
             previousGreenNs = greenNs
+
+            if config.exportTrainingData:
+                # optional dataset export: capture one training row per cycle
+                # this row stores normalized state + a target NS ratio label
+                cycleTrainingRows.append(
+                    buildTrainingRow(
+                        controllerName=controller.name,
+                        countId=data.count_id,
+                        cycleIndex=cycleCounter,
+                        qNS=queueNs,
+                        qEW=queueEw,
+                        arrivalNS=arrivalNs,
+                        arrivalEW=arrivalEw,
+                        prevGreenNS=controlInput.prevGreenNS,
+                        effectiveGreenSeconds=effectiveGreenSeconds,
+                        queueScale=float(config.trainingQueueScale),
+                    )
+                )
 
             # begins the time in this cycle now
             # inner loop
@@ -269,6 +354,7 @@ def simIntersection(
             
             # continue through the cycle one timestep until the cycle ends or the 15 min interval ends
             while cycleClock < config.cycle_length_seconds and simClock < intervalLength:
+                queueBeforeStep = qByApproach.copy()
                 
                 # NS green ends after the green NS given by the controller ends
                 nsGreenEnd = greenNs
@@ -299,7 +385,7 @@ def simIntersection(
                 # add them to total arrivals as well to store
                 for approach, amount in arrivalsStep.items():
                     qByApproach[approach] += amount
-                    storeMetrics.totalArrivals += amount
+                    metricsStore.totalArrivals += amount
 
                 # we need to compute the departures but start at 0
                 departures = {"n": 0.0, "e": 0.0, "s": 0.0, "w": 0.0}
@@ -328,24 +414,78 @@ def simIntersection(
                 for approach in ("n", "e", "s", "w"):
                     qByApproach[approach] -= departures[approach]
                     qByApproach[approach] = max(0.0, qByApproach[approach])
-                    storeMetrics.throughputVehicles += departures[approach]
+                    metricsStore.throughputVehicles += departures[approach]
+                    checkInvariant(
+                        checkInvariants,
+                        qByApproach[approach] >= -invariantTolerance,
+                        f"negative queue on {approach}: {qByApproach[approach]}",
+                    )
+
+                if checkInvariants:
+                    for approach in ("n", "e", "s", "w"):
+                        expectedQueue = queueBeforeStep[approach] + arrivalsStep[approach] - departures[approach]
+                        checkInvariant(
+                            checkInvariants,
+                            abs(qByApproach[approach] - expectedQueue) <= invariantTolerance,
+                            (
+                                f"queue conservation mismatch on {approach}: "
+                                f"expected={expectedQueue}, got={qByApproach[approach]}"
+                            ),
+                        )
+                        checkInvariant(
+                            checkInvariants,
+                            departures[approach] <= copyOfQueue[approach] + invariantTolerance,
+                            (
+                                f"departures exceed queue on {approach}: "
+                                f"depart={departures[approach]}, queue={copyOfQueue[approach]}"
+                            ),
+                        )
+
+                    stepCapacity = dischargeCap * stepSeconds
+                    for approach in ("n", "e", "s", "w"):
+                        checkInvariant(
+                            checkInvariants,
+                            departures[approach] <= stepCapacity + invariantTolerance,
+                            (
+                                f"departures exceed saturation on {approach}: "
+                                f"depart={departures[approach]}, cap={stepCapacity}"
+                            ),
+                        )
+                    if currentlyServed == "ns":
+                        checkInvariant(
+                            checkInvariants,
+                            departures["e"] <= invariantTolerance and departures["w"] <= invariantTolerance,
+                            "EW departures occurred during NS service phase",
+                        )
+                    elif currentlyServed == "ew":
+                        checkInvariant(
+                            checkInvariants,
+                            departures["n"] <= invariantTolerance and departures["s"] <= invariantTolerance,
+                            "NS departures occurred during EW service phase",
+                        )
+                    else:
+                        checkInvariant(
+                            checkInvariants,
+                            all(departures[a] <= invariantTolerance for a in ("n", "e", "s", "w")),
+                            "departures occurred during transition/non-service phase",
+                        )
 
                 # ASSUMPTION: assumes vehicles leaving from a nonzero queue had to stop.
                 # if NS
                 if currentlyServed == "ns":
                     # if North had a queue before departure, then the departing north vehicles are counted as stopped vehicles
                     if copyOfQueue["n"] > 0:
-                        storeMetrics.totalStops += departures["n"]
+                        metricsStore.totalStops += departures["n"]
                     # same for south
                     if copyOfQueue["s"] > 0:
-                        storeMetrics.totalStops += departures["s"]
+                        metricsStore.totalStops += departures["s"]
                         
                 # same for EW
                 elif currentlyServed == "ew":
                     if copyOfQueue["e"] > 0:
-                        storeMetrics.totalStops += departures["e"]
+                        metricsStore.totalStops += departures["e"]
                     if copyOfQueue["w"] > 0:
-                        storeMetrics.totalStops += departures["w"]
+                        metricsStore.totalStops += departures["w"]
 
                 # update total queued vehicles across all approaches in this timestep
                 totalQueue = qByApproach["n"] + qByApproach["e"] + qByApproach["s"] + qByApproach["w"]
@@ -354,16 +494,24 @@ def simIntersection(
                 # delay approximation
                 # if total queue = 8 vehicles, step = 1 second.
                 #   then 8 vehicle-seconds of delay are added.
-                storeMetrics.totalDelayVehicleinSeconds += totalQueue * stepSeconds
+                metricsStore.totalDelayVehicleinSeconds += totalQueue * stepSeconds
                 
                 # also store the same value as average queue computation later
-                storeMetrics.queueOverTime += totalQueue * stepSeconds
+                metricsStore.queueOverTime += totalQueue * stepSeconds
                 
                 # update the max queue ever seen in any approach
-                storeMetrics.maxQVehicles = max(storeMetrics.maxQVehicles, totalQueue)
+                metricsStore.maxQVehicles = max(metricsStore.maxQVehicles, totalQueue)
                 
                 # count one more timestep
-                storeMetrics.steps += 1
+                metricsStore.steps += 1
+                checkInvariant(
+                    checkInvariants,
+                    metricsStore.throughputVehicles <= metricsStore.totalArrivals + initialQueueVehicles + invariantTolerance,
+                    (
+                        f"throughput exceeds supply: throughput={metricsStore.throughputVehicles}, "
+                        f"arrivals={metricsStore.totalArrivals}, initial_queue={initialQueueVehicles}"
+                    ),
+                )
 
                 # update and advance time inside the current cycle and inside the current 15 min interval
                 cycleClock += stepSeconds
@@ -381,6 +529,6 @@ def simIntersection(
     }
     # adds the computed performance metrics
     # now we have indentifiers from above and results here
-    outputRow.update(storeMetrics.convertToResult())
+    outputRow.update(metricsStore.convertToResult())
     
-    return outputRow
+    return outputRow, cycleTrainingRows

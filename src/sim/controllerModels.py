@@ -34,6 +34,7 @@ from __future__ import annotations
 # to ensure MATLAB engine is only started once and only once even if multiple calls
 # aka a lock
 import threading
+import subprocess
 
 # imports dataclass for data containers
 from dataclasses import dataclass
@@ -77,15 +78,20 @@ class Controller(Protocol):
 # restricts the number to a valid range
 # so the controller doesn't propose unrealistic values
 # aka the green cant be too long or too short, so we set minimum and max values
-def minMaxCaps(proposedVal: float, min: float, max: float) -> float:
-    return max(min, min(proposedVal, max))
+def minMaxCaps(proposedVal: float, minVal: float, maxVal: float) -> float:
+    return max(minVal, min(proposedVal, maxVal))
+
+
+def checkInvariant(enabled: bool, condition: bool, message: str) -> None:
+    if enabled and not condition:
+        raise AssertionError(f"Controller invariant failed: {message}")
 
 # ---------------------- CONTROLLERS ----------------------------- #
 
 # the simplest controller
 class baselineFixed:
     def __init__(controller, simConfig: SimulationConfig) -> None: # takes simulation config because it needs min green, max green, NS ratio
-        controller.nameOfController = "baseline_fixed" # controller name
+        controller.name = "baseline_fixed" # controller name
         controller.minGreen = float(simConfig.minGreenSecs) # stores as floats for min and max green bounds
         controller.maxGreen = float(simConfig.maxGreenSecs)
         controller.fixedRatio = simConfig.fixedNSRatio # stores the fixed ns green ratio
@@ -93,7 +99,7 @@ class baselineFixed:
         # ratio is a value from 0.0 to 1.0 representing 0% to 100%
 
     # DECISION METHOD
-    def decisionGreenNS(controller, input: controlInp) -> float:
+    def decideGreenNS(controller, input: controlInp) -> float:
         desiredGreen = controller.fixedRatio * input.effecGreenSecs # computes the desired NS green using a fixed proportion of the effective green
         # for example, if effective green is 76 s, and ratio is 0.5, then desired green is 38 s.
         
@@ -108,7 +114,7 @@ class baselineProportional:
         controller.minGreen = float(simConfig.minGreenSecs) # stores green bounds
         controller.maxGreen = float(simConfig.maxGreenSecs)
 
-    def decisionGreenNS(controller, input: controlInp) -> float:
+    def decideGreenNS(controller, input: controlInp) -> float:
         totalArrival = input.arrivalNS + input.arrivalEW # this time it adds total arrival demand across both phases, this is the denominator for the ratio
         if totalArrival <= 0: # if no arrivals, then default to 0.5 split
             nsRatio = 0.5
@@ -139,6 +145,7 @@ class anfisController:
         controller.matlabLock = threading.Lock() # creates a lockwhen initializing matlab engine, so only one thread can initialize at once
         controller.matlabEngineObj = None # empty right now, will hold a MATLAB engine object later
         controller.matlabFuncName = "" # starts empty until the matlab entrypoint is parsed
+        controller.octaveEntrypoint = contConfig.octaveEntry
 
     # placeholder until the full neuro fuzzy controller is implemented
     # it behaves adaptively, but its a placeholder heuristic
@@ -223,12 +230,119 @@ class anfisController:
             return controller.matlabEngineObj
 
     # the simulator calls this for anfiscontroller
-    def decisionGreenNS(controller, input: controlInp) -> float:
+    def decisionOctavePlaceholder(controller, input: controlInp) -> float:
+        if not controller.octaveEntrypoint:
+            raise RuntimeError(
+                "ANFIS Octave mode is planned but not wired yet. "
+                "Provide --octave-entrypoint later, or run --anfis-mode stub/matlab now."
+            )
+        raise RuntimeError(
+            "ANFIS Octave mode placeholder is not implemented yet. "
+            f"Configured entrypoint: {controller.octaveEntrypoint}"
+        )
+
+    # the simulator calls this for anfiscontroller
+    def decideGreenNS(controller, input: controlInp) -> float:
         if controller.mode == "matlab": # if in matlab mode, call the matlab implementation
             rawGreen = controller.decisionMATLAB(input)
+        elif controller.mode == "octave":
+            rawGreen = controller.decisionOctavePlaceholder(input)
         else: # otherwise use the python stub heuristic (backup) -- fallback
             rawGreen = controller.decisionStub(input)
         return minMaxCaps(rawGreen, controller.minGreen, controller.maxGreen) # checks min max bounds and returns
+
+
+class neuroFuzzyOctaveController:
+    # adaptive controller that calls an external Octave evaluator
+    # input state is reduced to:
+    #   i. normalized total queue
+    #   ii. queue imbalance between NS and EW
+    # octave returns ns_ratio, then we convert that into NS green seconds
+    def __init__(controller, simConfig: SimulationConfig, contConfig: ControllerConfig) -> None:
+        controller.name = "neuro_fuzzy_octave"
+        controller.minGreen = float(simConfig.minGreenSecs)
+        controller.maxGreen = float(simConfig.maxGreenSecs)
+        controller.queueScale = float(simConfig.trainingQueueScale)
+        controller.checkInvariants = bool(simConfig.enableInvariantChecks)
+        controller.invariantTolerance = float(simConfig.invariantTolerance)
+        controller.timeoutSeconds = float(contConfig.matlab_timeout_seconds)
+        controller.octaveCliPath = str(contConfig.octaveCliPath).strip()
+        repoRoot = Path(__file__).resolve().parents[2]
+        controller.evalScriptPath = repoRoot / "octave_controller" / "evaluate_one_state.m"
+
+    def evaluateRatioOctave(controller, queueTotalNorm: float, imbalance: float) -> float:
+        # hard checks so we fail early with actionable messages
+        if not controller.octaveCliPath:
+            raise RuntimeError("Octave CLI path is empty. Set --octave-cli-path.")
+        if not Path(controller.octaveCliPath).exists():
+            raise RuntimeError(f"Octave CLI not found at: {controller.octaveCliPath}")
+        if not controller.evalScriptPath.exists():
+            raise RuntimeError(f"Octave evaluation script not found: {controller.evalScriptPath}")
+
+        # run octave script with two scalar features as command line args
+        command = [
+            controller.octaveCliPath,
+            "--quiet",
+            str(controller.evalScriptPath),
+            f"{queueTotalNorm:.10f}",
+            f"{imbalance:.10f}",
+        ]
+        try:
+            # capture stdout/stderr and enforce timeout so simulation cannot hang forever
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=controller.timeoutSeconds,
+            )
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError(
+                "Octave controller call failed. "
+                f"stderr: {error.stderr.strip()}"
+            ) from error
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"Octave controller timed out after {controller.timeoutSeconds:.1f}s."
+            ) from error
+
+        # expected output: last stdout line is a single numeric ns_ratio
+        rawOutput = completed.stdout.strip()
+        if not rawOutput:
+            raise RuntimeError("Octave controller returned empty stdout.")
+        try:
+            return float(rawOutput.splitlines()[-1].strip())
+        except ValueError as error:
+            raise RuntimeError(f"Invalid Octave controller output: {rawOutput}") from error
+
+    def decideGreenNS(controller, input: controlInp) -> float:
+        # derive compact state features from live queue values
+        queueTotal = float(input.qNS + input.qEW)
+        queueTotalNorm = min(queueTotal / max(controller.queueScale, 1e-6), 1.0)
+        imbalance = (float(input.qNS) - float(input.qEW)) / max(queueTotal, 1e-6)
+        # optional sanity checks for feature ranges
+        checkInvariant(
+            controller.checkInvariants,
+            -controller.invariantTolerance <= imbalance <= 1.0 + controller.invariantTolerance
+            and -1.0 - controller.invariantTolerance <= imbalance,
+            f"imbalance out of range: {imbalance}",
+        )
+        checkInvariant(
+            controller.checkInvariants,
+            -controller.invariantTolerance <= queueTotalNorm <= 1.0 + controller.invariantTolerance,
+            f"queue_total_norm out of range: {queueTotalNorm}",
+        )
+
+        # ask octave model for ratio, clamp to [0,1], then map ratio -> green seconds
+        nsRatio = controller.evaluateRatioOctave(queueTotalNorm, imbalance)
+        checkInvariant(
+            controller.checkInvariants,
+            -controller.invariantTolerance <= nsRatio <= 1.0 + controller.invariantTolerance,
+            f"raw ns_ratio out of range: {nsRatio}",
+        )
+        nsRatio = minMaxCaps(float(nsRatio), 0.0, 1.0)
+        desiredGreen = nsRatio * float(input.effecGreenSecs)
+        return minMaxCaps(desiredGreen, controller.minGreen, controller.maxGreen)
 
 # builds the correct controller object
 # returns it
@@ -241,5 +355,7 @@ def returnController(simConfig: SimulationConfig, controlConfig: ControllerConfi
     if controlConfig.controller_name == "anfis": # if asking for anfis use that
         # this needs both configs to determine whether matlab or stub
         return anfisController(simConfig, controlConfig)
+    if controlConfig.controller_name in {"neuro_fuzzy_octave", "anfis_octave"}:
+        return neuroFuzzyOctaveController(simConfig, controlConfig)
     # error - crash if it doesn't recognize the controller type
     raise ValueError(f"ERROR. Controller not recognized: {controlConfig.controller_name}")

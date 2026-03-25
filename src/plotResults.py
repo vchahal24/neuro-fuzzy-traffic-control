@@ -47,6 +47,7 @@ def parseCLIArgs() -> argparse.Namespace:
     parser.add_argument("--timeseries", default="")
     parser.add_argument("--timeseries-count-id", default="")
     parser.add_argument("--dark-theme", action="store_true")
+    parser.add_argument("--report-style", action="store_true")
 
     return parser.parse_args()
 
@@ -271,229 +272,244 @@ def saveFigure(fig: plt.Figure, outPath: Path) -> None:
     plt.close(fig)
 
 
-# fig 01
-def plotMeanDelay(plotCtx: Object, outPath: Path) -> None:
-    delayCol = "avg_delay_per_vehicle_seconds"
-    baselineSeries = toNumericSafe(plotCtx.longDataFrame[plotCtx.longDataFrame["controller"] == plotCtx.baselineCtrlName][delayCol]).dropna()
-    anfisSeries = toNumericSafe(plotCtx.longDataFrame[plotCtx.longDataFrame["controller"] == plotCtx.anfisCtrlName][delayCol]).dropna()
+def controllerDisplayName(name: str) -> str:
+    mapping = {
+        "baseline_fixed": "Fixed baseline",
+        "baseline_proportional": "Proportional baseline",
+        "neuro_fuzzy_octave": "Neuro-fuzzy Octave",
+        "anfis": "ANFIS",
+    }
+    return mapping.get(str(name), str(name))
 
-    fig = plt.figure(figsize=(7.2, 5.0))
+
+def addBarValueLabels(ax: plt.Axes, bars, fmt: str = "{:.2f}", suffix: str = "", fontsize: int = 10) -> None:
+    for bar in bars:
+        value = float(bar.get_height())
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            value,
+            f"{fmt.format(value)}{suffix}",
+            ha="center",
+            va="bottom",
+            fontsize=fontsize,
+        )
+
+
+def percentImprovement(oldVal: float, newVal: float) -> float:
+    if oldVal == 0:
+        return float("nan")
+    return ((oldVal - newVal) / oldVal) * 100.0
+
+
+def plotOverallImprovementSummary(plotCtx: Object, outPath: Path) -> None:
+    baselineMean = float(toNumericSafe(plotCtx.pairedDataFrame["baseline_delay"]).mean())
+    anfisMean = float(toNumericSafe(plotCtx.pairedDataFrame["anfis_delay"]).mean())
+    improvePct = percentImprovement(baselineMean, anfisMean)
+
+    baseName = controllerDisplayName(plotCtx.baselineCtrlName)
+    anfisName = controllerDisplayName(plotCtx.anfisCtrlName)
+
+    fig = plt.figure(figsize=(10.0, 6.2))
     ax = fig.add_subplot(111)
-    ax.bar(
-        [plotCtx.baselineCtrlName, plotCtx.anfisCtrlName],
-        [float(baselineSeries.mean()), float(anfisSeries.mean())],
-        yerr=[calc95Ci(baselineSeries), calc95Ci(anfisSeries)],
-        capsize=5,
+    compLabel = f"{anfisName} vs {baseName}"
+    barColor = "#2a9d8f" if improvePct >= 0 else "#e76f51"
+    bars = ax.bar([compLabel], [improvePct], color=[barColor], width=0.6)
+    addBarValueLabels(ax, bars, fmt="{:.2f}", suffix="%", fontsize=12)
+    ax.axhline(0.0, color="black", linewidth=1.0)
+    ax.set_title(f"{anfisName} Improvement vs {baseName}", fontsize=15)
+    ax.set_ylabel("Mean improvement vs baseline (%)", fontsize=12)
+    ax.grid(axis="y", alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=11)
+    ax.text(
+        0.5,
+        0.95,
+        f"Based on delay burden per served vehicle",
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=10,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.7, "edgecolor": "#cccccc"},
     )
-    ax.set_title("mean delay / veh (95% CI)")
-    ax.set_ylabel("avg_delay_per_vehicle_seconds")
-    ax.set_xlabel("controller")
     saveFigure(fig, outPath)
 
 
-# fig 02
-def plotDelayBox(plotCtx: Object, outPath: Path) -> None:
-    baselineSeries = toNumericSafe(plotCtx.pairedDataFrame["baseline_delay"]).dropna()
-    anfisSeries = toNumericSafe(plotCtx.pairedDataFrame["anfis_delay"]).dropna()
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.boxplot([baselineSeries, anfisSeries], labels=[plotCtx.baselineCtrlName, plotCtx.anfisCtrlName], showfliers=False)
-    ax.set_title("delay distribution")
-    ax.set_ylabel("avg_delay_per_vehicle_seconds")
-    ax.set_xlabel("controller")
-    saveFigure(fig, outPath)
-
-
-# fig 03
-def plotDelayImproveHist(plotCtx: Object, outPath: Path) -> None:
-    improveSeries = toNumericSafe(plotCtx.delayImprovePctSeries).dropna()
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.hist(improveSeries, bins=20)
-    ax.set_title("delay improvement pct distribution")
-    ax.set_xlabel("improvement_pct")
-    ax.set_ylabel("intersection_count")
-    saveFigure(fig, outPath)
-
-
-# fig 04
-def plotCongestionVsImprove(plotCtx: Object, outPath: Path) -> None:
-    xSeries = toNumericSafe(plotCtx.pairedDataFrame["baseline_delay"])
-    ySeries = toNumericSafe(plotCtx.delayImprovePctSeries)
-    validMask = xSeries.notna() & ySeries.notna()
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.scatter(xSeries[validMask], ySeries[validMask], alpha=0.75)
-    ax.axhline(0.0, linewidth=1)
-    ax.set_title("benefit vs baseline congestion")
-    ax.set_xlabel("baseline_avg_delay_per_vehicle_seconds")
-    ax.set_ylabel("improvement_pct")
-    saveFigure(fig, outPath)
-
-
-# fig 05
-def plotDemandVsImprove(plotCtx: Object, outPath: Path) -> None:
-    if "total_vehicle_day" not in plotCtx.pairedDataFrame.columns:
-        return
-
-    xSeries = toNumericSafe(plotCtx.pairedDataFrame["total_vehicle_day"])
-    ySeries = toNumericSafe(plotCtx.delayImprovePctSeries)
-    validMask = xSeries.notna() & ySeries.notna()
-    if validMask.sum() == 0:
-        return
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.scatter(xSeries[validMask], ySeries[validMask], alpha=0.75)
-    ax.axhline(0.0, linewidth=1)
-    ax.set_title("benefit vs demand")
-    ax.set_xlabel("total_vehicle_day")
-    ax.set_ylabel("improvement_pct")
-    saveFigure(fig, outPath)
-
-
-# fig 06
-def plotLegTypeImproveBar(plotCtx: Object, outPath: Path) -> None:
-    if "leg_type" not in plotCtx.pairedDataFrame.columns:
-        return
-
+def plotDelayPerIntersection(plotCtx: Object, outPath: Path) -> None:
+    delayImprove = toNumericSafe(plotCtx.delayImprovePctSeries)
     tempDf = pd.DataFrame(
         {
-            "leg_type": plotCtx.pairedDataFrame["leg_type"].astype(str),
-            "improvement": toNumericSafe(plotCtx.delayImprovePctSeries),
+            "count_id": plotCtx.pairedDataFrame["count_id"].astype(str),
+            "improvement": delayImprove,
         }
     ).dropna()
     if tempDf.empty:
         return
+    tempDf = tempDf.sort_values("improvement", ascending=False)
 
-    groupedMean = tempDf.groupby("leg_type", dropna=False)["improvement"].mean().sort_values(ascending=False)
-
-    fig = plt.figure(figsize=(8.0, 5.0))
+    fig = plt.figure(figsize=(10.5, max(5.0, 0.55 * len(tempDf) + 2.0)))
     ax = fig.add_subplot(111)
-    ax.bar(groupedMean.index.astype(str), groupedMean.values)
-    ax.axhline(0.0, linewidth=1)
-    ax.set_title("mean improvement by leg type")
-    ax.set_xlabel("leg_type")
-    ax.set_ylabel("improvement_pct")
-    ax.tick_params(axis="x", labelrotation=20)
+    colors = np.where(tempDf["improvement"] >= 0, "#2a9d8f", "#e76f51")
+    bars = ax.barh(tempDf["count_id"], tempDf["improvement"], color=colors)
+    ax.axvline(0.0, color="black", linewidth=1)
+    ax.invert_yaxis()
+    ax.set_title("Delay Improvement by Intersection", fontsize=14)
+    ax.set_xlabel("Improvement (%)", fontsize=12)
+    ax.set_ylabel("Count ID", fontsize=12)
+    ax.grid(axis="x", alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=10)
+
+    for bar, val in zip(bars, tempDf["improvement"]):
+        x = bar.get_width()
+        xOffset = 0.5 if x >= 0 else -0.5
+        ha = "left" if x >= 0 else "right"
+        ax.text(
+            x + xOffset,
+            bar.get_y() + bar.get_height() / 2.0,
+            f"{val:.2f}%",
+            va="center",
+            ha=ha,
+            fontsize=9,
+        )
     saveFigure(fig, outPath)
 
 
-# fig 07
-def plotDelayCdf(plotCtx: Object, outPath: Path) -> None:
-    baselineSeries = np.sort(toNumericSafe(plotCtx.pairedDataFrame["baseline_delay"]).dropna().values)
-    anfisSeries = np.sort(toNumericSafe(plotCtx.pairedDataFrame["anfis_delay"]).dropna().values)
-    if len(baselineSeries) == 0 or len(anfisSeries) == 0:
-        return
-
-    baselineY = np.arange(1, len(baselineSeries) + 1) / len(baselineSeries)
-    anfisY = np.arange(1, len(anfisSeries) + 1) / len(anfisSeries)
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.plot(baselineSeries, baselineY, label=plotCtx.baselineCtrlName)
-    ax.plot(anfisSeries, anfisY, label=plotCtx.anfisCtrlName)
-    ax.set_title("cdf of delay / veh")
-    ax.set_xlabel("avg_delay_per_vehicle_seconds")
-    ax.set_ylabel("cdf")
-    ax.legend()
-    saveFigure(fig, outPath)
-
-
-# fig 08
-def plotThroughputScatter(plotCtx: Object, outPath: Path) -> None:
-    baselineSeries = toNumericSafe(plotCtx.pairedDataFrame["baseline_throughput"])
-    anfisSeries = toNumericSafe(plotCtx.pairedDataFrame["anfis_throughput"])
-    validMask = baselineSeries.notna() & anfisSeries.notna()
-    if validMask.sum() == 0:
-        return
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.scatter(baselineSeries[validMask], anfisSeries[validMask], alpha=0.75)
-    minVal = float(min(baselineSeries[validMask].min(), anfisSeries[validMask].min()))
-    maxVal = float(max(baselineSeries[validMask].max(), anfisSeries[validMask].max()))
-    ax.plot([minVal, maxVal], [minVal, maxVal], linewidth=1)
-    ax.set_title("throughput baseline vs anfis")
-    ax.set_xlabel("baseline_throughput_vehicles")
-    ax.set_ylabel("anfis_throughput_vehicles")
-    saveFigure(fig, outPath)
-
-
-# fig 09
-def plotQueueMaxBox(plotCtx: Object, outPath: Path) -> None:
-    baselineSeries = toNumericSafe(plotCtx.pairedDataFrame["baseline_max_queue"]).dropna()
-    anfisSeries = toNumericSafe(plotCtx.pairedDataFrame["anfis_max_queue"]).dropna()
-    if len(baselineSeries) == 0 or len(anfisSeries) == 0:
-        return
-
-    fig = plt.figure(figsize=(7.2, 5.0))
-    ax = fig.add_subplot(111)
-    ax.boxplot([baselineSeries, anfisSeries], labels=[plotCtx.baselineCtrlName, plotCtx.anfisCtrlName], showfliers=False)
-    ax.set_title("max queue comparison")
-    ax.set_ylabel("max_queue_vehicles")
-    ax.set_xlabel("controller")
-    saveFigure(fig, outPath)
-
-
-# fig 10
-def plotDemandBinImproveBar(plotCtx: Object, outPath: Path, demandBins: int) -> None:
-    if "total_vehicle_day" not in plotCtx.pairedDataFrame.columns:
-        return
-
-    demandSeries = toNumericSafe(plotCtx.pairedDataFrame["total_vehicle_day"])
-    improveSeries = toNumericSafe(plotCtx.delayImprovePctSeries)
-    tempDf = pd.DataFrame({"demand": demandSeries, "improvement": improveSeries}).dropna()
-
-    if len(tempDf) < max(4, demandBins):
-        return
-
-    try:
-        tempDf["demand_bin"] = pd.qcut(tempDf["demand"], q=demandBins, duplicates="drop")
-    except ValueError:
-        return
-
-    groupedMean = tempDf.groupby("demand_bin", dropna=False)["improvement"].mean()
-
-    fig = plt.figure(figsize=(8.8, 5.0))
-    ax = fig.add_subplot(111)
-    ax.bar([str(x) for x in groupedMean.index], groupedMean.values)
-    ax.axhline(0.0, linewidth=1)
-    ax.set_title("mean improvement by demand bin")
-    ax.set_xlabel("total_vehicle_day_quantile_bin")
-    ax.set_ylabel("improvement_pct")
-    ax.tick_params(axis="x", labelrotation=20)
-    saveFigure(fig, outPath)
-
-
-# fig 11
-def plotPeakHourImproveBar(plotCtx: Object, outPath: Path) -> None:
-    if "peak_hour_start" not in plotCtx.pairedDataFrame.columns:
-        return
-
-    peakHourText = plotCtx.pairedDataFrame["peak_hour_start"].fillna("").astype(str).str[-5:]
+def plotDelayDumbbell(plotCtx: Object, outPath: Path) -> None:
     tempDf = pd.DataFrame(
         {
-            "peak_hour_bucket": peakHourText.replace("", "unknown"),
-            "improvement": toNumericSafe(plotCtx.delayImprovePctSeries),
+            "count_id": plotCtx.pairedDataFrame["count_id"].astype(str),
+            "baseline_delay": toNumericSafe(plotCtx.pairedDataFrame["baseline_delay"]),
+            "anfis_delay": toNumericSafe(plotCtx.pairedDataFrame["anfis_delay"]),
         }
     ).dropna()
     if tempDf.empty:
         return
+    tempDf = tempDf.sort_values("baseline_delay", ascending=False).reset_index(drop=True)
+    yPos = np.arange(len(tempDf))
 
-    groupedMean = tempDf.groupby("peak_hour_bucket", dropna=False)["improvement"].mean().sort_index().head(12)
+    baseName = controllerDisplayName(plotCtx.baselineCtrlName)
+    anfisName = controllerDisplayName(plotCtx.anfisCtrlName)
 
-    fig = plt.figure(figsize=(8.8, 5.0))
+    fig = plt.figure(figsize=(10.5, max(5.0, 0.55 * len(tempDf) + 2.0)))
     ax = fig.add_subplot(111)
-    ax.bar(groupedMean.index.astype(str), groupedMean.values)
-    ax.axhline(0.0, linewidth=1)
-    ax.set_title("mean improvement by peak hour")
-    ax.set_xlabel("peak_hour_bucket")
-    ax.set_ylabel("improvement_pct")
-    ax.tick_params(axis="x", labelrotation=25)
+    for idx, row in tempDf.iterrows():
+        ax.plot([row["baseline_delay"], row["anfis_delay"]], [yPos[idx], yPos[idx]], color="#999999", linewidth=1.5)
+    ax.scatter(tempDf["baseline_delay"], yPos, color="#4c78a8", s=45, label=baseName, zorder=3)
+    ax.scatter(tempDf["anfis_delay"], yPos, color="#2a9d8f", s=45, label=anfisName, zorder=3)
+    ax.set_yticks(yPos)
+    ax.set_yticklabels(tempDf["count_id"])
+    ax.invert_yaxis()
+    ax.set_title("Per-Intersection Delay Burden: Baseline vs Neuro-fuzzy", fontsize=14)
+    ax.set_xlabel("Delay burden per served vehicle (s)", fontsize=12)
+    ax.set_ylabel("Count ID", fontsize=12)
+    ax.grid(axis="x", alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=10)
+    ax.legend(fontsize=10)
+    saveFigure(fig, outPath)
+
+
+def plotThroughputReadable(plotCtx: Object, outPath: Path) -> None:
+    baselineMean = float(toNumericSafe(plotCtx.pairedDataFrame["baseline_throughput"]).mean())
+    anfisMean = float(toNumericSafe(plotCtx.pairedDataFrame["anfis_throughput"]).mean())
+    improvePct = float("nan") if baselineMean == 0 else ((anfisMean - baselineMean) / baselineMean) * 100.0
+
+    baseName = controllerDisplayName(plotCtx.baselineCtrlName)
+    anfisName = controllerDisplayName(plotCtx.anfisCtrlName)
+
+    fig = plt.figure(figsize=(9.2, 6.0))
+    ax = fig.add_subplot(111)
+    bars = ax.bar([baseName, anfisName], [baselineMean, anfisMean], color=["#4c78a8", "#2a9d8f"])
+    addBarValueLabels(ax, bars, fmt="{:.1f}", suffix="", fontsize=11)
+    ax.set_title(f"Mean Throughput Comparison: {baseName} vs {anfisName}", fontsize=14)
+    ax.set_ylabel("Throughput (vehicles)", fontsize=12)
+    ax.grid(axis="y", alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=11)
+    ax.text(
+        0.5,
+        0.95,
+        f"Throughput change: {improvePct:.2f}%",
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=11,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.7, "edgecolor": "#cccccc"},
+    )
+    saveFigure(fig, outPath)
+
+
+def plotMaxQueueReadable(plotCtx: Object, outPath: Path) -> None:
+    baselineMean = float(toNumericSafe(plotCtx.pairedDataFrame["baseline_max_queue"]).mean())
+    anfisMean = float(toNumericSafe(plotCtx.pairedDataFrame["anfis_max_queue"]).mean())
+    improvePct = percentImprovement(baselineMean, anfisMean)
+
+    baseName = controllerDisplayName(plotCtx.baselineCtrlName)
+    anfisName = controllerDisplayName(plotCtx.anfisCtrlName)
+
+    fig = plt.figure(figsize=(9.2, 6.0))
+    ax = fig.add_subplot(111)
+    bars = ax.bar([baseName, anfisName], [baselineMean, anfisMean], color=["#4c78a8", "#2a9d8f"])
+    addBarValueLabels(ax, bars, fmt="{:.2f}", suffix="", fontsize=11)
+    ax.set_title("Mean Maximum Queue Comparison (Lower is better)", fontsize=14)
+    ax.set_ylabel("Maximum queue (vehicles)", fontsize=12)
+    ax.grid(axis="y", alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=11)
+    ax.text(
+        0.5,
+        0.95,
+        f"Queue reduction: {improvePct:.2f}%",
+        transform=ax.transAxes,
+        ha="center",
+        va="top",
+        fontsize=11,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.7, "edgecolor": "#cccccc"},
+    )
+    saveFigure(fig, outPath)
+
+
+def plotImprovementByCategory(plotCtx: Object, outPath: Path) -> None:
+    sourceDf = plotCtx.pairedDataFrame.copy()
+    sourceDf["improvement"] = toNumericSafe(plotCtx.delayImprovePctSeries)
+    sourceDf = sourceDf.dropna(subset=["improvement"])
+    if sourceDf.empty:
+        return
+
+    categoryLabel = ""
+    if len(sourceDf) < 10:
+        if "leg_type" in sourceDf.columns and sourceDf["leg_type"].notna().sum() > 0:
+            sourceDf["category"] = sourceDf["leg_type"].astype(str)
+            categoryLabel = "Leg type"
+        elif "peak_hour_start" in sourceDf.columns and sourceDf["peak_hour_start"].notna().sum() > 0:
+            sourceDf["category"] = sourceDf["peak_hour_start"].fillna("").astype(str).str[-5:].replace("", "unknown")
+            categoryLabel = "Peak hour"
+        else:
+            return
+    elif "leg_type" in sourceDf.columns and sourceDf["leg_type"].notna().sum() > 0:
+        sourceDf["category"] = sourceDf["leg_type"].astype(str)
+        categoryLabel = "Leg type"
+    elif "peak_hour_start" in sourceDf.columns and sourceDf["peak_hour_start"].notna().sum() > 0:
+        sourceDf["category"] = sourceDf["peak_hour_start"].fillna("").astype(str).str[-5:].replace("", "unknown")
+        categoryLabel = "Peak hour"
+    else:
+        return
+
+    grouped = sourceDf.groupby("category", dropna=False)["improvement"].mean().sort_values(ascending=False)
+    if grouped.empty:
+        return
+
+    fig = plt.figure(figsize=(10.0, 5.8))
+    ax = fig.add_subplot(111)
+    bars = ax.bar(grouped.index.astype(str), grouped.values, color="#4c78a8")
+    ax.axhline(0.0, color="black", linewidth=1)
+    ax.set_title(f"Mean Delay Improvement by {categoryLabel}", fontsize=14)
+    ax.set_ylabel("Improvement (%)", fontsize=12)
+    ax.set_xlabel(categoryLabel, fontsize=12)
+    ax.grid(axis="y", alpha=0.25, linestyle="--")
+    ax.tick_params(axis="both", labelsize=10)
+    if len(grouped) > 4:
+        ax.tick_params(axis="x", labelrotation=20)
+
+    for bar, val in zip(bars, grouped.values):
+        va = "bottom" if val >= 0 else "top"
+        offset = 0.6 if val >= 0 else -0.6
+        ax.text(bar.get_x() + bar.get_width() / 2.0, val + offset, f"{val:.2f}%", ha="center", va=va, fontsize=9)
     saveFigure(fig, outPath)
 
 
@@ -559,32 +575,41 @@ def plotOptionalTimeSeries(args: argparse.Namespace, outDir: Path) -> list[Path]
 def printPlotSummary(plotCtx: Object, outFiles: list[Path]) -> None:
     pairedDf = plotCtx.pairedDataFrame.copy()
     pairedDf["delayImprovePct"] = toNumericSafe(plotCtx.delayImprovePctSeries)
-
-    throughputImprovePct = (
+    validImprove = toNumericSafe(pairedDf["delayImprovePct"]).dropna()
+    throughputChange = (
         (toNumericSafe(pairedDf["anfis_throughput"]) - toNumericSafe(pairedDf["baseline_throughput"]))
         / toNumericSafe(pairedDf["baseline_throughput"]).replace(0, np.nan)
         * 100.0
-    )
-    queueImprovePct = (
+    ).dropna()
+    queueChange = (
         (toNumericSafe(pairedDf["baseline_max_queue"]) - toNumericSafe(pairedDf["anfis_max_queue"]))
         / toNumericSafe(pairedDf["baseline_max_queue"]).replace(0, np.nan)
         * 100.0
-    )
+    ).dropna()
 
-    totalRows = len(pairedDf)
-    delayRows = int(toNumericSafe(pairedDf["delayImprovePct"]).notna().sum())
-    throughputRows = int(toNumericSafe(throughputImprovePct).notna().sum())
-    queueRows = int(toNumericSafe(queueImprovePct).notna().sum())
+    improvedCount = int((validImprove > 0).sum())
+    worsenedCount = int((validImprove < 0).sum())
+    sameCount = int((validImprove == 0).sum())
 
-    print("plot summary:")
-    print(f"- paired intersections: {totalRows}")
-    print(f"- delay rows used: {delayRows} (skipped: {totalRows - delayRows})")
-    print(f"- throughput rows used: {throughputRows}")
-    print(f"- queue rows used: {queueRows}")
-    print(f"- baseline=0 delay rows skipped by safe divide: {plotCtx.baselineZeroDelayRows}")
-    print(f"- mean delay improvement pct: {toNumericSafe(pairedDf['delayImprovePct']).dropna().mean():.3f}")
-    print(f"- mean throughput improvement pct: {toNumericSafe(throughputImprovePct).dropna().mean():.3f}")
-    print(f"- mean queue improvement pct: {toNumericSafe(queueImprovePct).dropna().mean():.3f}")
+    print("report summary:")
+    print("- note: Delay metric shown in plots is a simulation-derived delay burden normalized by served vehicles; use relative comparison rather than absolute real-world interpretation.")
+    print(f"- paired intersections: {len(pairedDf)}")
+    print(f"- mean delay improvement %: {validImprove.mean():.3f}")
+    print(f"- median delay improvement %: {validImprove.median():.3f}")
+    print(f"- intersections improved: {improvedCount}")
+    print(f"- intersections worsened: {worsenedCount}")
+    print(f"- intersections unchanged: {sameCount}")
+
+    if not validImprove.empty:
+        bestIdx = validImprove.idxmax()
+        worstIdx = validImprove.idxmin()
+        bestCountId = str(pairedDf.loc[bestIdx, "count_id"])
+        worstCountId = str(pairedDf.loc[worstIdx, "count_id"])
+        print(f"- best intersection improvement: {bestCountId} ({validImprove.loc[bestIdx]:.3f}%)")
+        print(f"- worst intersection improvement: {worstCountId} ({validImprove.loc[worstIdx]:.3f}%)")
+    print(f"- mean throughput change %: {throughputChange.mean():.3f}")
+    print(f"- mean max queue change %: {queueChange.mean():.3f}")
+
     print("- generated files:")
     for outPath in outFiles:
         print(f"  - {outPath}")
@@ -608,17 +633,12 @@ def main() -> None:
 
     outFiles: list[Path] = []
     plotJobs = [
-        ("fig01_meanDelay.png", lambda: plotMeanDelay(plotCtx, outDir / "fig01_meanDelay.png")),
-        ("fig02_delayBox.png", lambda: plotDelayBox(plotCtx, outDir / "fig02_delayBox.png")),
-        ("fig03_delayImproveHist.png", lambda: plotDelayImproveHist(plotCtx, outDir / "fig03_delayImproveHist.png")),
-        ("fig04_congestionVsImprove.png", lambda: plotCongestionVsImprove(plotCtx, outDir / "fig04_congestionVsImprove.png")),
-        ("fig05_demandVsImprove.png", lambda: plotDemandVsImprove(plotCtx, outDir / "fig05_demandVsImprove.png")),
-        ("fig06_legTypeImproveBar.png", lambda: plotLegTypeImproveBar(plotCtx, outDir / "fig06_legTypeImproveBar.png")),
-        ("fig07_delayCdf.png", lambda: plotDelayCdf(plotCtx, outDir / "fig07_delayCdf.png")),
-        ("fig08_throughputScatter.png", lambda: plotThroughputScatter(plotCtx, outDir / "fig08_throughputScatter.png")),
-        ("fig09_queueMaxBox.png", lambda: plotQueueMaxBox(plotCtx, outDir / "fig09_queueMaxBox.png")),
-        ("fig10_demandBinImproveBar.png", lambda: plotDemandBinImproveBar(plotCtx, outDir / "fig10_demandBinImproveBar.png", args.demand_bins)),
-        ("fig11_peakHourImproveBar.png", lambda: plotPeakHourImproveBar(plotCtx, outDir / "fig11_peakHourImproveBar.png")),
+        ("fig01_overallImprovementSummary.png", lambda: plotOverallImprovementSummary(plotCtx, outDir / "fig01_overallImprovementSummary.png")),
+        ("fig02_delayPerIntersection.png", lambda: plotDelayPerIntersection(plotCtx, outDir / "fig02_delayPerIntersection.png")),
+        ("fig03_delayDumbbell.png", lambda: plotDelayDumbbell(plotCtx, outDir / "fig03_delayDumbbell.png")),
+        ("fig04_throughputReadable.png", lambda: plotThroughputReadable(plotCtx, outDir / "fig04_throughputReadable.png")),
+        ("fig05_maxQueueReadable.png", lambda: plotMaxQueueReadable(plotCtx, outDir / "fig05_maxQueueReadable.png")),
+        ("fig06_improvementByCategory.png", lambda: plotImprovementByCategory(plotCtx, outDir / "fig06_improvementByCategory.png")),
     ]
 
     for fileName, jobFunc in plotJobs:

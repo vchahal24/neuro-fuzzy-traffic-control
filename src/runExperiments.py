@@ -66,12 +66,20 @@ def parseCLIArgs() -> argparse.Namespace:
     
     # --anfis-mode option to specify how to run the ANFIS controller
     # this can be either stub or matlab as choices
-    parser.add_argument("--anfis-mode", default="stub", choices=["stub", "matlab"])
+    parser.add_argument("--anfis-mode", default="stub", choices=["stub", "matlab", "octave"])
     
     # --matlab-entrypoint option to specify the path to the MATLAB script for ANFIS mode
     parser.add_argument(
         "--matlab-entrypoint",
         default="",
+    )
+    parser.add_argument(
+        "--octave-entrypoint",
+        default="",
+    )
+    parser.add_argument(
+        "--octave-cli-path",
+        default=r"C:\Program Files\GNU Octave\Octave-11.1.0\mingw64\bin\octave-cli.exe",
     )
 
     # --most-recent-only flag to only run experiments on the most recent data for each intersection
@@ -99,6 +107,11 @@ def parseCLIArgs() -> argparse.Namespace:
     parser.add_argument("--min-green", type=int, default=10)
     parser.add_argument("--max-green", type=int, default=60)
     parser.add_argument("--fixed-ns-ratio", type=float, default=0.5)
+    parser.add_argument("--enable-invariant-checks", action="store_true")
+    parser.add_argument("--invariant-tolerance", type=float, default=1e-6)
+    parser.add_argument("--export-training-data", action="store_true")
+    parser.add_argument("--training-queue-scale", type=float, default=40.0)
+    parser.add_argument("--training-csv-name", default="cycle_training_data.csv")
 
     # parse the arguments and return
     return parser.parse_args()
@@ -130,6 +143,11 @@ def convertToConfig(args: argparse.Namespace) -> tuple[DataSelectionConfig, Simu
         minGreenSecs=args.min_green,
         maxGreenSecs=args.max_green,
         fixedNSRatio=args.fixed_ns_ratio,
+        enableInvariantChecks=args.enable_invariant_checks,
+        invariantTolerance=max(0.0, args.invariant_tolerance),
+        exportTrainingData=args.export_training_data,
+        trainingQueueScale=max(1e-6, args.training_queue_scale),
+        trainingCsvName=args.training_csv_name,
     )
 
     # list of controllers
@@ -148,6 +166,8 @@ def convertToConfig(args: argparse.Namespace) -> tuple[DataSelectionConfig, Simu
                 controller_name=name,
                 anfisMode=args.anfis_mode,
                 matlabEntry=args.matlab_entrypoint,
+                octaveEntry=args.octave_entrypoint,
+                octaveCliPath=args.octave_cli_path,
             )
         )
         

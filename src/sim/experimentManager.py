@@ -179,17 +179,18 @@ def experimentManager(
     #   one controller
     #   one sim result
     outputRows: list[dict[str, object]] = []
+    trainingRows: list[dict[str, object]] = []
     # loop through each selected intersection
     for trafficData in intersections:
         # for each intersection, loop through each controller config
         # so if theres 100 intersections, 3 controllers = 300 runs
-        for controllerConfig in controllerConfig:
+        for controllerCfg in controllerConfig:
             # build the controller object
             # examples: baselinefixed, baselineproportional, anfis
-            controller = returnController(simConfig, controllerConfig)
+            controller = returnController(simConfig, controllerCfg)
             
             # run the actual queue sim for this: intersection, controller, sim config
-            simulationResult = simIntersection(trafficData, controller, simConfig)
+            simulationResult, cycleRows = simIntersection(trafficData, controller, simConfig)
             
             # make a plain dictionary copy of the sim result
             mergedRow = dict(simulationResult)
@@ -201,6 +202,8 @@ def experimentManager(
             # add the completed row to the master output list
             # this repeats for each intersection-controller pair
             outputRows.append(mergedRow)
+            if simConfig.exportTrainingData:
+                trainingRows.extend(cycleRows)
 
     # converts every collected row into a DataFrame
     # this becomes the detailed per intersection results table
@@ -230,6 +233,7 @@ def experimentManager(
     resultsPath = outDir / "results_per_intersection.csv"
     groupedPath = outDir / "results_aggregated.csv"
     configPath = outDir / "run_config.json"
+    trainingPath = outDir / simConfig.trainingCsvName
 
     # write rper intersection results to CSV
     resultsDataFrame.to_csv(resultsPath, index=False)
@@ -248,6 +252,10 @@ def experimentManager(
     
     # writes the config snapshot to the JSON file
     pd.Series(configSnapshot).to_json(configPath, indent=2)
+
+    if simConfig.exportTrainingData:
+        trainingDataFrame = pd.DataFrame(trainingRows)
+        trainingDataFrame.to_csv(trainingPath, index=False)
 
     # returns both DataFrame to caller
     # so now the function:
